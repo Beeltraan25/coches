@@ -42,14 +42,12 @@
       const [isLogged, setIsLogged] = React.useState(false);
       const [showPDF, setShowPDF] = React.useState(false);
       
-      // Estado para los precios de la gasolina
-      const [fuelPrices, setFuelPrices] = React.useState({ diesel: "Cargando...", gasolina: "Cargando..." });
+      const [fuelPrices, setFuelPrices] = React.useState({ diesel: "Buscando...", gasolina: "Buscando..." });
 
       const pdfUrl = "https://escuelapolitecnica.uah.es/export/sites/politecnica/es/.galleries/estudiantes/Semestre1_GIC.pdf";
       const days = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
       const shifts = ["8-10", "10-12", "12-14", "15-17", "17-19", "19-21"];
 
-      // Cargar datos en tiempo real de Firebase
       React.useEffect(() => {
         const unsubscribe = docRef.onSnapshot((docSnap) => {
           if (docSnap.exists) {
@@ -61,52 +59,66 @@
         return () => unsubscribe();
       }, []);
 
-      // Conexión a la API del Ministerio para precios de la gasolina (Guadalajara, código 19)
-      // Buscamos el precio más bajo
+      // Conexión súper estable a la API del Ministerio con 3 proxies de repuesto
       React.useEffect(() => {
-        const url = "https://sedeaplicaciones.minetur.gob.es/ServiciosRESTCarburantes/PreciosCarburantes/EstacionesTerrestres/FiltroProvincia/19";
-        
-        // Usamos una conexión más directa y cruda (raw) para evitar errores de lectura
-        fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`)
-          .then(response => {
-            if (!response.ok) throw new Error('Error en la red');
-            return response.json();
-          })
-          .then(apiData => {
-            const stations = apiData.ListaEESSPrecio;
-            if (stations && stations.length > 0) {
-              let minGasolina = Infinity;
-              let minDiesel = Infinity;
-              
-              stations.forEach(station => {
-                const gasStr = station["Precio Gasolina 95 E5"];
-                const dieselStr = station["Precio Gasoleo A"];
-                
-                if (gasStr) {
-                  const gasPrice = parseFloat(gasStr.replace(',', '.'));
-                  // Comprobamos que sea un número válido mayor que 0 y menor que el mínimo actual
-                  if (!isNaN(gasPrice) && gasPrice > 0 && gasPrice < minGasolina) {
-                    minGasolina = gasPrice;
-                  }
-                }
-                if (dieselStr) {
-                  const dieselPrice = parseFloat(dieselStr.replace(',', '.'));
-                  if (!isNaN(dieselPrice) && dieselPrice > 0 && dieselPrice < minDiesel) {
-                    minDiesel = dieselPrice;
-                  }
-                }
-              });
-              
-              setFuelPrices({
-                gasolina: minGasolina !== Infinity ? minGasolina.toFixed(3) + " €/L" : "N/A",
-                diesel: minDiesel !== Infinity ? minDiesel.toFixed(3) + " €/L" : "N/A"
-              });
+        const fetchPrices = async () => {
+          const targetUrl = "https://sedeaplicaciones.minetur.gob.es/ServiciosRESTCarburantes/PreciosCarburantes/EstacionesTerrestres/FiltroProvincia/19";
+          
+          // Lista de puentes por si alguno falla
+          const proxies = [
+            `https://api.codetabs.com/v1/proxy?quest=${targetUrl}`,
+            `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
+            `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`
+          ];
+
+          let apiData = null;
+
+          // Intenta conectar con cada puente uno por uno
+          for (let proxy of proxies) {
+            try {
+              const response = await fetch(proxy);
+              if (response.ok) {
+                apiData = await response.json();
+                break; // Si funciona, rompemos el bucle y avanzamos
+              }
+            } catch (error) {
+              console.warn("Falló el puente, intentando el siguiente...");
             }
-          })
-          .catch(error => {
-            console.error("Error obteniendo precios:", error);
-            setFuelPrices({ gasolina: "Error", diesel: "Error" });
-          });
+          }
+
+          if (apiData && apiData.ListaEESSPrecio) {
+            const stations = apiData.ListaEESSPrecio;
+            let minGasolina = Infinity;
+            let minDiesel = Infinity;
+            
+            stations.forEach(station => {
+              const gasStr = station["Precio Gasolina 95 E5"];
+              const dieselStr = station["Precio Gasoleo A"];
+              
+              if (gasStr) {
+                const gasPrice = parseFloat(gasStr.replace(',', '.'));
+                if (!isNaN(gasPrice) && gasPrice > 0 && gasPrice < minGasolina) {
+                  minGasolina = gasPrice;
+                }
+              }
+              if (dieselStr) {
+                const dieselPrice = parseFloat(dieselStr.replace(',', '.'));
+                if (!isNaN(dieselPrice) && dieselPrice > 0 && dieselPrice < minDiesel) {
+                  minDiesel = dieselPrice;
+                }
+              }
+            });
+            
+            setFuelPrices({
+              gasolina: minGasolina !== Infinity ? minGasolina.toFixed(3) + " €/L" : "N/A",
+              diesel: minDiesel !== Infinity ? minDiesel.toFixed(3) + " €/L" : "N/A"
+            });
+          } else {
+            setFuelPrices({ gasolina: "Error web", diesel: "Error web" });
+          }
+        };
+
+        fetchPrices();
       }, []);
 
       const login = (e) => {
@@ -167,7 +179,6 @@
           .map(([name]) => name);
       };
 
-      // Calcular Ranking
       const driverCounts = {};
       Object.keys(data.users || {}).forEach(user => driverCounts[user] = 0);
       
@@ -235,15 +246,15 @@
               <span className="text-4xl">⛽</span>
               <div>
                 <h3 className="text-amber-400 font-bold text-lg">Precio Más Bajo</h3>
-                <p className="text-slate-400 text-xs mt-1">Datos oficiales actualizados hoy • Provincia de Guadalajara</p>
+                <p className="text-slate-400 text-xs mt-1">Gasolineras en Provincia de Guadalajara (Hoy)</p>
               </div>
             </div>
             <div className="flex gap-6 pr-4">
-              <div className="text-center bg-slate-900 px-4 py-2 rounded-lg border border-slate-700">
+              <div className="text-center bg-slate-900 px-4 py-2 rounded-lg border border-slate-700 min-w-[110px]">
                 <div className="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-1">Gasolina 95</div>
                 <div className="text-xl font-bold text-slate-100">{fuelPrices.gasolina}</div>
               </div>
-              <div className="text-center bg-slate-900 px-4 py-2 rounded-lg border border-slate-700">
+              <div className="text-center bg-slate-900 px-4 py-2 rounded-lg border border-slate-700 min-w-[110px]">
                 <div className="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-1">Diésel</div>
                 <div className="text-xl font-bold text-slate-100">{fuelPrices.diesel}</div>
               </div>
