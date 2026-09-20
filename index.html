@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Coche Compartido - Amigos</title>
   
-  <!-- Carga de React, Tailwind y Firebase (Todo sin instalar nada) -->
+  <!-- Carga de React, Tailwind y Firebase -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -18,7 +18,7 @@
 
   <script type="text/babel">
     // =========================================================
-    // TU CONFIGURACIÓN DE FIREBASE (Ya integrada)
+    // TU CONFIGURACIÓN DE FIREBASE CORREGIDA
     // =========================================================
     const firebaseConfig = {
       apiKey: "AIzaSyBDmqr4lkAU5uAtbh_0BMdTvPma0gc59cA",
@@ -61,6 +61,29 @@
       const login = (e) => {
         e.preventDefault();
         if (myName.trim()) setIsLogged(true);
+      };
+
+      // Función para borrar todos los datos del usuario actual
+      const deleteAccount = () => {
+        if (window.confirm("¿Estás seguro de que quieres borrar todos tus turnos y viajes? Tu nombre desaparecerá de la tabla.")) {
+          
+          let newUsers = { ...data.users };
+          delete newUsers[myName]; // Borramos al usuario de la lista
+
+          let newDrivers = { ...data.drivers };
+          // Le quitamos de conductor en los turnos donde estuviera
+          Object.keys(newDrivers).forEach(shiftId => {
+            if (newDrivers[shiftId] === myName) {
+              newDrivers[shiftId] = ""; 
+            }
+          });
+
+          // Actualizamos la base de datos y cerramos sesión
+          docRef.update({ users: newUsers, drivers: newDrivers }).then(() => {
+            setMyName("");
+            setIsLogged(false);
+          });
+        }
       };
 
       const toggleShift = (day, shift) => {
@@ -123,10 +146,19 @@
       // PANTALLA PRINCIPAL (TABLA)
       return (
         <div className="max-w-6xl mx-auto p-4 md:p-8">
-          <div className="flex justify-between items-center mb-8">
+          <div className="flex flex-wrap justify-between items-center mb-8 gap-4">
             <h1 className="text-3xl font-bold text-emerald-400">🚗 Turnos del Coche</h1>
-            <div className="bg-slate-800 px-4 py-2 rounded-lg border border-slate-700">
-              Hola, <span className="text-emerald-400 font-bold">{myName}</span>
+            <div className="flex items-center gap-3">
+              <div className="bg-slate-800 px-4 py-2 rounded-lg border border-slate-700">
+                Hola, <span className="text-emerald-400 font-bold">{myName}</span>
+              </div>
+              <button 
+                onClick={deleteAccount}
+                className="bg-red-500/10 text-red-400 border border-red-500/50 hover:bg-red-500 hover:text-white px-3 py-2 rounded-lg transition-colors text-sm font-semibold"
+                title="Borrar mis datos y salir"
+              >
+                Borrar cuenta
+              </button>
             </div>
           </div>
 
@@ -142,6 +174,9 @@
                   <span className="text-2xl font-bold text-emerald-400 mt-1">{count}</span>
                 </div>
               ))}
+              {Object.keys(driverCounts).length === 0 && (
+                <span className="text-slate-400 text-sm">Aún no hay conductores asignados.</span>
+              )}
             </div>
           </div>
 
