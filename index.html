@@ -37,7 +37,8 @@
     const docRef = db.collection("coche_compartido").doc("semana");
 
     function App() {
-      const [data, setData] = React.useState({ users: {}, drivers: {} });
+      // Añadimos dailyDrivers al estado inicial
+      const [data, setData] = React.useState({ users: {}, drivers: {}, dailyDrivers: {} });
       const [myName, setMyName] = React.useState("");
       const [isLogged, setIsLogged] = React.useState(false);
 
@@ -50,7 +51,7 @@
           if (docSnap.exists) {
             setData(docSnap.data());
           } else {
-            docRef.set({ users: {}, drivers: {} });
+            docRef.set({ users: {}, drivers: {}, dailyDrivers: {} });
           }
         }, (error) => {
           console.error("Error al conectar con la base de datos:", error);
@@ -78,8 +79,16 @@
             }
           });
 
+          let newDailyDrivers = { ...(data.dailyDrivers || {}) };
+          // Le quitamos de conductor del día si lo era
+          Object.keys(newDailyDrivers).forEach(day => {
+            if (newDailyDrivers[day] === myName) {
+              newDailyDrivers[day] = ""; 
+            }
+          });
+
           // Actualizamos la base de datos y cerramos sesión
-          docRef.update({ users: newUsers, drivers: newDrivers }).then(() => {
+          docRef.update({ users: newUsers, drivers: newDrivers, dailyDrivers: newDailyDrivers }).then(() => {
             setMyName("");
             setIsLogged(false);
           });
@@ -105,6 +114,11 @@
         docRef.update({ drivers: newDrivers });
       };
 
+      const setDailyDriver = (day, driverName) => {
+        let newDailyDrivers = { ...(data.dailyDrivers || {}), [day]: driverName };
+        docRef.update({ dailyDrivers: newDailyDrivers });
+      };
+
       const getPeopleInShift = (day, shift) => {
         const shiftId = `${day}_${shift}`;
         return Object.entries(data.users || {})
@@ -112,10 +126,16 @@
           .map(([name]) => name);
       };
 
-      // Calcular Ranking de Conductores
+      // Calcular Ranking de Conductores (suma los turnos sueltos y los días completos)
       const driverCounts = {};
       Object.keys(data.users || {}).forEach(user => driverCounts[user] = 0);
+      
+      // Contar turnos individuales
       Object.values(data.drivers || {}).forEach(driver => {
+        if (driver) driverCounts[driver] = (driverCounts[driver] || 0) + 1;
+      });
+      // Contar días completos
+      Object.values(data.dailyDrivers || {}).forEach(driver => {
         if (driver) driverCounts[driver] = (driverCounts[driver] || 0) + 1;
       });
 
@@ -142,6 +162,9 @@
           </div>
         );
       }
+
+      // Todos los usuarios registrados para los desplegables
+      const allUsers = Object.keys(data.users || {});
 
       // PANTALLA PRINCIPAL (TABLA)
       return (
@@ -181,14 +204,36 @@
           </div>
 
           {/* Tabla */}
-          <div className="overflow-x-auto bg-slate-800 rounded-2xl border border-slate-700 shadow-xl">
+          <div className="overflow-x-auto bg-slate-800 rounded-2xl border border-slate-700 shadow-xl pb-4">
             <table className="w-full text-center border-collapse min-w-[800px]">
               <thead>
                 <tr className="bg-slate-900/50">
-                  <th className="p-4 border-b border-r border-slate-700 w-24">Hora</th>
-                  {days.map(day => (
-                    <th key={day} className="p-4 border-b border-slate-700 text-emerald-400">{day}</th>
-                  ))}
+                  <th className="p-4 border-b border-r border-slate-700 w-24 align-top">
+                    <div className="font-bold text-slate-300 mt-2">Hora</div>
+                  </th>
+                  {days.map(day => {
+                    const currentDailyDriver = (data.dailyDrivers || {})[day] || "";
+                    return (
+                      <th key={day} className="p-4 border-b border-slate-700 align-top">
+                        <div className="text-emerald-400 font-bold text-lg mb-3">{day}</div>
+                        
+                        {/* Selector de coche del día */}
+                        <div className="bg-slate-800/80 p-2 rounded-lg border border-slate-600">
+                          <div className="text-xs font-normal text-slate-400 mb-1">Coche de hoy:</div>
+                          <select 
+                            value={currentDailyDriver}
+                            onChange={(e) => setDailyDriver(day, e.target.value)}
+                            className={`w-full text-sm p-1.5 rounded bg-slate-900 border ${currentDailyDriver ? 'border-emerald-500 text-emerald-400 font-semibold' : 'border-slate-600 text-slate-300'} focus:outline-none`}
+                          >
+                            <option value="">Nadie asignado</option>
+                            {allUsers.map(u => (
+                              <option key={u} value={u}>{u}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -208,7 +253,7 @@
                             onClick={() => toggleShift(day, shift)}
                             className={`w-full p-2 rounded-lg text-sm font-medium transition-all duration-300 ${
                               amIGoing 
-                                ? "bg-emerald-500/20 border-emerald-500 text-emerald-400 border" 
+                                ? "bg-emerald-500/20 border-emerald-500 text-emerald-400 border shadow-[0_0_10px_rgba(16,185,129,0.2)]" 
                                 : "bg-slate-700 border-transparent text-slate-400 hover:bg-slate-600 border"
                             }`}
                           >
@@ -218,22 +263,22 @@
                           {/* Lista de personas */}
                           <div className="mt-2 min-h-[24px] flex flex-wrap justify-center gap-1">
                             {people.map(p => (
-                              <span key={p} className={`text-xs px-2 py-1 rounded-full ${isMatch ? 'bg-cyan-500/20 text-cyan-300' : 'bg-slate-600 text-slate-300'}`}>
+                              <span key={p} className={`text-xs px-2 py-1 rounded-full ${isMatch ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' : 'bg-slate-600 text-slate-300'}`}>
                                 {p}
                               </span>
                             ))}
                           </div>
 
-                          {/* Selección de conductor si hay coincidencia */}
+                          {/* Selección de conductor para este turno específico (si hay coincidencia) */}
                           {isMatch && (
                             <div className="mt-3 pt-3 border-t border-slate-600/50">
-                              <span className="text-xs text-slate-400 block mb-1">¿Quién conduce?</span>
+                              <span className="text-[10px] uppercase tracking-wider text-slate-400 block mb-1">Conductor del turno</span>
                               <select 
                                 value={currentDriver}
                                 onChange={(e) => setDriver(day, shift, e.target.value)}
-                                className={`w-full text-xs p-1 rounded bg-slate-900 border ${currentDriver ? 'border-emerald-500 text-emerald-400' : 'border-slate-600 text-slate-300'}`}
+                                className={`w-full text-xs p-1 rounded bg-slate-900 border ${currentDriver ? 'border-cyan-500 text-cyan-400' : 'border-slate-600 text-slate-300'}`}
                               >
-                                <option value="">Sin conductor</option>
+                                <option value="">Sin definir</option>
                                 {people.map(p => (
                                   <option key={p} value={p}>{p}</option>
                                 ))}
