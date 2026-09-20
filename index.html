@@ -62,21 +62,21 @@
       }, []);
 
       // Conexión a la API del Ministerio para precios de la gasolina (Guadalajara, código 19)
+      // Buscamos el precio más bajo
       React.useEffect(() => {
         const url = "https://sedeaplicaciones.minetur.gob.es/ServiciosRESTCarburantes/PreciosCarburantes/EstacionesTerrestres/FiltroProvincia/19";
         
-        // Usamos allorigins como puente para que GitHub no bloquee la conexión (CORS)
-        fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`)
+        // Usamos una conexión más directa y cruda (raw) para evitar errores de lectura
+        fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`)
           .then(response => {
-            if (response.ok) return response.json();
-            throw new Error('Error en la red');
+            if (!response.ok) throw new Error('Error en la red');
+            return response.json();
           })
-          .then(data => {
-            const apiData = JSON.parse(data.contents);
+          .then(apiData => {
             const stations = apiData.ListaEESSPrecio;
             if (stations && stations.length > 0) {
-              let totalGasolina = 0; let countGasolina = 0;
-              let totalDiesel = 0; let countDiesel = 0;
+              let minGasolina = Infinity;
+              let minDiesel = Infinity;
               
               stations.forEach(station => {
                 const gasStr = station["Precio Gasolina 95 E5"];
@@ -84,17 +84,22 @@
                 
                 if (gasStr) {
                   const gasPrice = parseFloat(gasStr.replace(',', '.'));
-                  if (!isNaN(gasPrice)) { totalGasolina += gasPrice; countGasolina++; }
+                  // Comprobamos que sea un número válido mayor que 0 y menor que el mínimo actual
+                  if (!isNaN(gasPrice) && gasPrice > 0 && gasPrice < minGasolina) {
+                    minGasolina = gasPrice;
+                  }
                 }
                 if (dieselStr) {
                   const dieselPrice = parseFloat(dieselStr.replace(',', '.'));
-                  if (!isNaN(dieselPrice)) { totalDiesel += dieselPrice; countDiesel++; }
+                  if (!isNaN(dieselPrice) && dieselPrice > 0 && dieselPrice < minDiesel) {
+                    minDiesel = dieselPrice;
+                  }
                 }
               });
               
               setFuelPrices({
-                gasolina: countGasolina > 0 ? (totalGasolina / countGasolina).toFixed(3) + " €/L" : "N/A",
-                diesel: countDiesel > 0 ? (totalDiesel / countDiesel).toFixed(3) + " €/L" : "N/A"
+                gasolina: minGasolina !== Infinity ? minGasolina.toFixed(3) + " €/L" : "N/A",
+                diesel: minDiesel !== Infinity ? minDiesel.toFixed(3) + " €/L" : "N/A"
               });
             }
           })
@@ -110,7 +115,7 @@
       };
 
       const deleteAccount = () => {
-        if (window.confirm("¿Estás seguro de que quieres borrar todos tus turnos y viajes?")) {
+        if (window.confirm("¿Estás seguro de que quieres borrar todos tus turnos y viajes? Tu nombre desaparecerá de la tabla.")) {
           let newUsers = { ...data.users };
           delete newUsers[myName];
 
@@ -224,12 +229,12 @@
             </div>
           </div>
 
-          {/* Panel de Precio de Combustible (Nuevo) */}
+          {/* Panel de Precio de Combustible */}
           <div className="bg-slate-800/80 rounded-2xl p-4 mb-8 border border-amber-500/20 shadow-lg flex flex-wrap justify-between items-center gap-4">
             <div className="flex items-center gap-4">
               <span className="text-4xl">⛽</span>
               <div>
-                <h3 className="text-amber-400 font-bold text-lg">Precio Medio Combustible</h3>
+                <h3 className="text-amber-400 font-bold text-lg">Precio Más Bajo</h3>
                 <p className="text-slate-400 text-xs mt-1">Datos oficiales actualizados hoy • Provincia de Guadalajara</p>
               </div>
             </div>
