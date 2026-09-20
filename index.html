@@ -18,7 +18,7 @@
 
   <script type="text/babel">
     // =========================================================
-    // TU CONFIGURACIÓN DE FIREBASE CORREGIDA
+    // TU CONFIGURACIÓN DE FIREBASE
     // =========================================================
     const firebaseConfig = {
       apiKey: "AIzaSyBDmqr4lkAU5uAtbh_0BMdTvPma0gc59cA",
@@ -29,14 +29,12 @@
       appId: "1:265052406529:web:8f0a3580b68d16a3c79100",
       measurementId: "G-90M6BQP2NH"
     };
-    // =========================================================
 
-    // Inicializamos Firebase
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
     const docRef = db.collection("coche_compartido").doc("semana");
 
-    // LISTA CERRADA DE NOMBRES PERMITIDOS (Ordenados alfabéticamente)
+    // LISTA CERRADA DE NOMBRES
     const ALLOWED_NAMES = [
       "Alvaro", "Angel", "Asier", "Beltran", "Benito", 
       "Jorge", "Juanal", "Marcos T", "Marcos Z", "Milan", 
@@ -44,7 +42,7 @@
     ];
 
     function App() {
-      const [data, setData] = React.useState({ users: {}, dailyDrivers: {} });
+      const [data, setData] = React.useState({ users: {}, dailyDrivers: {}, historicalScores: {} });
       const [myName, setMyName] = React.useState("");
       const [isLogged, setIsLogged] = React.useState(false);
       const [showPDF, setShowPDF] = React.useState(false);
@@ -53,13 +51,65 @@
       const days = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
       const shifts = ["8-10", "10-12", "12-14", "15-17", "17-19", "19-21"];
 
-      // Cargar datos en tiempo real de Firebase
       React.useEffect(() => {
         const unsubscribe = docRef.onSnapshot((docSnap) => {
           if (docSnap.exists) {
-            setData(docSnap.data());
+            const dbData = docSnap.data();
+            
+            // Función para obtener el día actual (YYYY-MM-DD)
+            const getTodayStr = () => {
+              const d = new Date();
+              return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            };
+            
+            const todayStr = getTodayStr();
+            
+            // SISTEMA DE BORRADO A LAS 00:00 Y GUARDADO DE PUNTOS
+            if (!dbData.lastCheckedDate) {
+              // Primera vez que se abre la app
+              docRef.update({ lastCheckedDate: todayStr, historicalScores: {} });
+              setData(dbData);
+            } else if (dbData.lastCheckedDate < todayStr) {
+              // ¡Ha pasado de medianoche! 
+              let newDailyDrivers = { ...(dbData.dailyDrivers || {}) };
+              let newHistorical = { ...(dbData.historicalScores || {}) };
+              let currentDateStr = dbData.lastCheckedDate;
+              let loops = 0;
+              
+              // Buscamos los días que han pasado para guardar los puntos antes de borrarlos
+              while (currentDateStr < todayStr && loops < 14) {
+                loops++;
+                let [y, m, d] = currentDateStr.split('-').map(Number);
+                let dObj = new Date(y, m - 1, d);
+                let dayName = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"][dObj.getDay()];
+                
+                // Si alguien tenía el coche asignado ese día, le damos 1 punto y lo borramos de la tabla
+                if (newDailyDrivers[dayName]) {
+                  let driver = newDailyDrivers[dayName];
+                  newHistorical[driver] = (newHistorical[driver] || 0) + 1;
+                  newDailyDrivers[dayName] = ""; 
+                }
+                
+                // Avanzamos al día siguiente
+                dObj.setDate(dObj.getDate() + 1);
+                currentDateStr = `${dObj.getFullYear()}-${String(dObj.getMonth() + 1).padStart(2, '0')}-${String(dObj.getDate()).padStart(2, '0')}`;
+              }
+              
+              // Guardamos la limpieza en la base de datos
+              docRef.update({
+                lastCheckedDate: todayStr,
+                dailyDrivers: newDailyDrivers,
+                historicalScores: newHistorical
+              });
+            } else {
+              // Día normal, solo cargamos los datos
+              setData(dbData);
+            }
           } else {
-            docRef.set({ users: {}, dailyDrivers: {} });
+            // Inicializar base de datos vacía
+            const d = new Date();
+            const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            docRef.set({ users: {}, dailyDrivers: {}, historicalScores: {}, lastCheckedDate: todayStr });
           }
         });
         return () => unsubscribe();
@@ -67,14 +117,11 @@
 
       const login = (e) => {
         e.preventDefault();
-        // Solo permite iniciar sesión si el nombre está en la lista permitida
-        if (ALLOWED_NAMES.includes(myName)) {
-          setIsLogged(true);
-        }
+        if (ALLOWED_NAMES.includes(myName)) setIsLogged(true);
       };
 
       const deleteAccount = () => {
-        if (window.confirm("¿Estás seguro de que quieres borrar todos tus turnos y viajes? Tu nombre desaparecerá de la tabla.")) {
+        if (window.confirm("¿Estás seguro de que quieres borrar todos tus turnos y dejar de ir? Tu historial de puntos se mantendrá.")) {
           let newUsers = { ...data.users };
           delete newUsers[myName];
 
@@ -115,16 +162,14 @@
           .map(([name]) => name);
       };
 
-      // Calcular Ranking (Solo cuenta los días que pones coche)
+      // CALCULAR RANKING (Puntos históricos guardados + Viajes planeados esta semana)
       const driverCounts = {};
-      // Inicializamos a 0 solo a los usuarios que han participado alguna vez
-      Object.keys(data.users || {}).forEach(user => driverCounts[user] = 0);
+      ALLOWED_NAMES.forEach(user => {
+        driverCounts[user] = data.historicalScores?.[user] || 0;
+      });
       
       Object.values(data.dailyDrivers || {}).forEach(driver => {
-        if (driver) {
-          if (driverCounts[driver] === undefined) driverCounts[driver] = 0;
-          driverCounts[driver] += 1;
-        }
+        if (driver) driverCounts[driver] += 1;
       });
 
       if (!isLogged) {
@@ -182,12 +227,12 @@
                 onClick={deleteAccount}
                 className="bg-red-500/10 text-red-400 border border-red-500/50 hover:bg-red-500 hover:text-white px-3 py-2 rounded-lg transition-colors text-sm font-semibold"
               >
-                Borrar cuenta
+                Borrar mis turnos
               </button>
             </div>
           </div>
 
-          {/* Visor PDF (Oculto por defecto) */}
+          {/* Visor PDF */}
           {showPDF && (
             <div className="bg-slate-800 rounded-2xl p-4 mb-8 border border-blue-500/30 shadow-lg h-[600px] flex flex-col">
               <div className="flex justify-between items-center mb-3 px-2">
@@ -196,28 +241,25 @@
                   Abrir en pestaña nueva ↗
                 </a>
               </div>
-              <iframe 
-                src={pdfUrl} 
-                className="w-full flex-1 rounded-xl bg-slate-300" 
-                title="Horario UAH"
-              ></iframe>
+              <iframe src={pdfUrl} className="w-full flex-1 rounded-xl bg-slate-300" title="Horario UAH"></iframe>
             </div>
           )}
 
-          {/* Ranking de conductores (Días) */}
+          {/* Ranking de conductores */}
           <div className="bg-slate-800 rounded-2xl p-6 mb-8 border border-emerald-500/20 shadow-lg">
             <h2 className="text-xl font-semibold mb-4 text-slate-200">🏆 Ranking (Días de coche)</h2>
             <div className="flex flex-wrap gap-4">
               {Object.entries(driverCounts)
                 .sort((a, b) => b[1] - a[1])
+                .filter(([name, count]) => count > 0) // Solo enseñamos los que tengan al menos 1 viaje
                 .map(([name, count]) => (
                 <div key={name} className="bg-slate-700 px-4 py-3 rounded-xl flex flex-col items-center min-w-[100px] border border-slate-600">
                   <span className="font-medium">{name}</span>
                   <span className="text-2xl font-bold text-emerald-400 mt-1">{count}</span>
                 </div>
               ))}
-              {Object.keys(driverCounts).length === 0 && (
-                <span className="text-slate-400 text-sm">Aún no hay conductores asignados.</span>
+              {Object.values(driverCounts).every(c => c === 0) && (
+                <span className="text-slate-400 text-sm">Aún no hay conductores con viajes.</span>
               )}
             </div>
           </div>
@@ -244,7 +286,6 @@
                             className={`w-full text-sm p-1.5 rounded bg-slate-900 border ${currentDailyDriver ? 'border-emerald-500 text-emerald-400 font-semibold' : 'border-slate-600 text-slate-300'} focus:outline-none`}
                           >
                             <option value="">Nadie asignado</option>
-                            {/* Ahora usamos la lista permitida para elegir conductor */}
                             {ALLOWED_NAMES.map(u => (
                               <option key={u} value={u}>{u}</option>
                             ))}
